@@ -229,6 +229,61 @@ if (shell) {
   mats.forEach(mt => { mt.side = THREE.DoubleSide; if (!mt.map && mt.metalness > 0.5) { mt.metalness = 0; mt.roughness = 0.9; } });
   renderer.toneMappingExposure = 0.9;
 }
+
+/* ---------- Galaxy ceiling (procedural GLSL, animated) ---------- */
+let galaxy = null;
+if (shell) {
+  const sb = boxOf(shell), sz = sb.getSize(new THREE.Vector3()), sc = sb.getCenter(new THREE.Vector3());
+  galaxy = new THREE.Mesh(
+    new THREE.PlaneGeometry(sz.x, sz.z),
+    new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uAspect: { value: sz.x / sz.z } },
+      toneMapped: false,
+      vertexShader: /* glsl */`
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */`
+        precision highp float;
+        uniform float uTime; uniform float uAspect;
+        varying vec2 vUv;
+        float hash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+          return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+        }
+        float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + 11.7; a *= 0.5; } return v; }
+        float stars(vec2 uv, float scale, float t) {
+          vec2 g = uv * scale, id = floor(g), f = fract(g) - 0.5;
+          float h = hash(id); if (h < 0.92) return 0.0;
+          vec2 o = vec2(hash(id + 3.1), hash(id + 7.7)) - 0.5;
+          float d = length(f - o * 0.7);
+          float tw = 0.6 + 0.4 * sin(t * (1.5 + h * 4.0) + h * 40.0);
+          return smoothstep(0.08, 0.0, d) * tw * (h - 0.92) * 12.5;
+        }
+        void main() {
+          vec2 p = (vUv - 0.5) * vec2(uAspect, 1.0) * 2.2;
+          float r = length(p), a = atan(p.y, p.x);
+          float t = uTime * 0.03;
+          // Two logarithmic spiral arms that slowly turn
+          float arms = 0.5 + 0.5 * cos(2.0 * (a - log(r + 0.05) * 2.6 + t * 6.0));
+          float swirl = fbm(vec2(a * 1.5 + t * 4.0, r * 3.0 - t * 2.0) + p * 1.7);
+          float disk = exp(-r * 1.6);
+          float neb = pow(arms, 2.5) * disk * (0.45 + 0.9 * swirl);
+          vec3 col = vec3(0.012, 0.01, 0.035);
+          col += neb * mix(vec3(0.55, 0.25, 0.95), vec3(0.2, 0.55, 1.0), swirl);
+          col += fbm(p * 2.5 - t) * vec3(0.08, 0.03, 0.12) * (1.0 - disk);
+          col += vec3(1.0, 0.85, 0.7) * exp(-r * 7.0) * 1.3;                 // bright core
+          col += stars(vUv * vec2(uAspect, 1.0), 90.0, uTime) * vec3(0.9, 0.95, 1.0);
+          col += stars(vUv * vec2(uAspect, 1.0) + 0.37, 45.0, uTime * 0.7) * vec3(1.0, 0.9, 0.8) * 1.4;
+          gl_FragColor = vec4(col, 1.0);
+        }`,
+    })
+  );
+  galaxy.rotation.x = Math.PI / 2; // face down into the room
+  galaxy.position.set(sc.x, sb.max.y - 0.03, sc.z);
+  galaxy.raycast = () => {};       // not clickable, never blocks a tap
+  scene.add(galaxy);
+}
 RX = (fb.max.x - fb.min.x) / 2; RZ = (fb.max.z - fb.min.z) / 2;
 const RC = fb.getCenter(new THREE.Vector3());
 FLOOR_Y = fb.min.y;
@@ -500,6 +555,7 @@ function frame() {
   const ps = panelShift(), kk = reduceMotion ? 1 : Math.min(1, dt * 6);
   if (Math.abs(ps.x - shift.x) > 0.5 || Math.abs(ps.y - shift.y) > 0.5) { shift.x += (ps.x - shift.x) * kk; shift.y += (ps.y - shift.y) * kk; applyView(); }
   if (!reduceMotion && WORKS[6].knot) WORKS[6].knot.rotation.y += dt * 0.12;
+  if (galaxy && !reduceMotion) galaxy.material.uniforms.uTime.value += dt;
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
