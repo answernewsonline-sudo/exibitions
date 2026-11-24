@@ -152,7 +152,7 @@ const WORKS = [
   { id: 7, artist: "Sami Haddad", born: "b. 1986, Beirut", title: "Knot for a Quiet Room", year: "2024", medium: "Patinated bronze on painted plinth", w: 60, h: 60, d: 45, wall: "C", paint: "sculpture",
     desc: "A single continuous loop folded through itself. Walk around it: from the entrance it reads as a ring, from the side as a tangle." },
 ];
-const WALL_NAME = { N: "North wall", W: "West wall", E: "East wall", C: "Centre plinth", P: "Free-standing panel" };
+const WALL_NAME = { N: "North wall", W: "West wall", E: "East wall", C: "Centre plinth", P: "Panel", O: "Object" };
 
 /* ---------- Room constants (metres) ---------- */
 let RX = 8, RZ = 6, FLOOR_Y = 0; // replaced by the floor size from room.glb
@@ -234,7 +234,11 @@ const RC = fb.getCenter(new THREE.Vector3());
 FLOOR_Y = fb.min.y;
 
 if (autoMode) {
-  const arts = meshes.filter(m => m !== shell && firstMat(m)?.map);
+  // Works are textured meshes inside the room; anything reaching outside it (landscape, backdrop) is scenery.
+  const inner = boxOf(shell).expandByScalar(0.1);
+  // A multi-material object arrives as a group of meshes: treat the group as one work.
+  const workOf = m => (m.parent && m.parent !== room && m.parent.isGroup && m.parent.children.every(c => c.isMesh)) ? m.parent : m;
+  const arts = [...new Set(meshes.filter(m => m !== shell && firstMat(m)?.map).map(workOf))].filter(o => inner.containsBox(boxOf(o)));
   WORKS.length = 0;
   arts.forEach((m, i) => {
     const b = boxOf(m), s = b.getSize(new THREE.Vector3());
@@ -249,7 +253,7 @@ const clickables = [], obstacles = [];
 for (const m of meshes) {
   m.receiveShadow = true;
   if (m.isSkinnedMesh) m.frustumCulled = false;
-  const ci = autoMode ? WORKS.findIndex(w => w.mesh === m) : catIndex(m);
+  const ci = autoMode ? WORKS.findIndex(w => w.mesh === m || w.mesh === m.parent) : catIndex(m);
   if (ci >= 0) { m.userData.work = ci; clickables.push(m); }
   if (isRoomShell(m)) continue;
   m.castShadow = true;
@@ -266,9 +270,18 @@ WORKS.forEach((wk, idx) => {
   wk.index = idx;
   if (autoMode) {
     const m = wk.mesh, b = boxOf(m), c = b.getCenter(new THREE.Vector3()), s = b.getSize(new THREE.Vector3());
-    // Face the way the plane's own normal points.
-    const nAttr = m.geometry.attributes.normal;
-    const n = nAttr ? new THREE.Vector3().fromBufferAttribute(nAttr, 0).applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(m.matrixWorld)) : new THREE.Vector3(0, 0, 1);
+    const flat = Math.min(s.x, s.z) < 0.1;
+    let n;
+    if (flat) {
+      // A panel: face the way the plane's own normal points.
+      const nAttr = m.geometry?.attributes.normal;
+      n = nAttr ? new THREE.Vector3().fromBufferAttribute(nAttr, 0).applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(m.matrixWorld)) : new THREE.Vector3(0, 0, 1);
+    } else {
+      // A 3D object: view it from the room's centre side. Scans often have flipped faces, so draw both sides.
+      n = RC.clone().sub(c);
+      m.traverse(o => { if (o.isMesh) (Array.isArray(o.material) ? o.material : [o.material]).forEach(mt => { mt.side = THREE.DoubleSide; }); });
+      wk.wall = "O"; wk.w = Math.round(s.x * 100); wk.h = Math.round(s.y * 100); wk.d = Math.round(s.z * 100);
+    }
     n.y = 0; if (n.lengthSq() < 1e-6) n.set(0, 0, 1); n.normalize();
     wk.center = c; wk.normal = n; wk.lookAt = c.clone().setY(Math.min(c.y, FLOOR_Y + EYE + 0.2));
     wk.size = { w: Math.max(s.x, s.z) + 0.6, h: s.y + 0.4 };

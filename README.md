@@ -2,7 +2,7 @@
 
 A browser gallery room built in Blender and shown with Three.js 0.160.0 (loaded from jsDelivr). No build step.
 
-> **Branch `scene-1glb`:** the page shows `scene-1.glb` (your uploaded 1.glb: a room box with 15 free-standing poster panels). `room.glb` here is that file with textures shrunk to 2048 px (2.5 MB instead of 26 MB). The scene has no `CatNN_` / `Room_` names, so the page runs in auto mode: the largest mesh is the room, every textured mesh is a work, and labels show "Artist to be added" until you fill in `WORKS`. `room-one.blend` is still the previous room, not the source of this scene.
+> **Branch `scene-2glb`:** the page shows your uploaded 2.glb (textured room, 21 posters, a mouflon scan and a rock scan). The original is 176 MB, over GitHub's 100 MB file limit, so it is not in the repo (it stays in the project files). `room.glb` (36 MB) is a web version made with `export_scan_web.py`: the mouflon is simplified from 750k to 250k faces, the rock from 650k to 60k, posters are kept at 2048 px and other textures shrunk to 1024 px. Auto mode treats textured objects inside the room as works (22: 21 posters and the mouflon) and the rock, which reaches outside the room, as scenery you can't walk through. `room-one.blend` is still the earlier room, not the source of this scene.
 
 ## Files
 - `room-one.blend`: the Blender scene (source of truth). Room, seven works, desk and chair, figure.
