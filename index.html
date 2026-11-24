@@ -138,6 +138,7 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 
 // Wait briefly for web fonts so the canvas-drawn wall labels use them.
 try { await Promise.race([Promise.all([document.fonts.load("600 34px Archivo"), document.fonts.load("italic 600 30px Archivo"), document.fonts.load("400 24px 'IBM Plex Mono'")]), new Promise(r => setTimeout(r, 1500))]); } catch {}
@@ -197,7 +198,7 @@ const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const loadingEl = document.getElementById("loading");
 const onProgress = e => { if (e.total) loadingEl.textContent = `Loading the room… ${Math.round(e.loaded / e.total * 100)}%`; };
-const loader = new GLTFLoader();
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 // room.glb on a normal web host; room.json (glTF with separate textures) where .glb files are not served.
 let gltf;
 try { gltf = await loader.loadAsync("room.glb", onProgress); }
@@ -205,6 +206,20 @@ catch { gltf = await loader.loadAsync("room.json", onProgress); }
 const room = gltf.scene;
 scene.add(room);
 room.updateMatrixWorld(true);
+
+// Surfaces named Baked_* carry light and shadow baked in Blender: show them as-is, without live lighting.
+let hasBaked = false;
+room.traverse(o => {
+  if (!o.isMesh) return;
+  const mats = Array.isArray(o.material) ? o.material : [o.material];
+  const out = mats.map(mt => {
+    if (!/^Baked_/.test(mt.name || "")) return mt;
+    hasBaked = true;
+    return new THREE.MeshBasicMaterial({ name: mt.name, map: mt.map, side: THREE.DoubleSide, toneMapped: false });
+  });
+  o.material = Array.isArray(o.material) ? out : out[0];
+});
+if (hasBaked) key.castShadow = false; // shadows on the room are already in the textures
 
 const catIndex = o => { for (let n = o; n; n = n.parent) { const m = /^Cat(\d\d)/.exec(n.name || ""); if (m) return +m[1] - 1; } return -1; };
 const meshes = [];
@@ -300,7 +315,7 @@ if (autoMode) {
   const inner = boxOf(shell).expandByScalar(0.1);
   // A multi-material object arrives as a group of meshes: treat the group as one work.
   const workOf = m => (m.parent && m.parent !== room && m.parent.isGroup && m.parent.children.every(c => c.isMesh)) ? m.parent : m;
-  const arts = [...new Set(meshes.filter(m => m !== shell && firstMat(m)?.map).map(workOf))].filter(o => inner.containsBox(boxOf(o)));
+  const arts = [...new Set(meshes.filter(m => m !== shell && !isRoomShell(m) && firstMat(m)?.map).map(workOf))].filter(o => inner.containsBox(boxOf(o)));
   WORKS.length = 0;
   arts.forEach((m, i) => {
     const b = boxOf(m), s = b.getSize(new THREE.Vector3());
@@ -335,7 +350,9 @@ WORKS.forEach((wk, idx) => {
     const flat = Math.min(s.x, s.z) < 0.1;
     let n;
     if (flat) {
-      // A panel: face the way the plane's own normal points.
+      // A panel: light-box look, then face the way the plane's own normal points.
+      const pm = firstMat(m);
+      if (pm && pm.map && pm.emissive) { pm.emissive.set(0xffffff); pm.emissiveMap = pm.map; pm.emissiveIntensity = 0.55; pm.needsUpdate = true; }
       const nAttr = m.geometry?.attributes.normal;
       n = nAttr ? new THREE.Vector3().fromBufferAttribute(nAttr, 0).applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(m.matrixWorld)) : new THREE.Vector3(0, 0, 1);
     } else {
