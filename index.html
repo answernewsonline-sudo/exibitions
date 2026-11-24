@@ -196,9 +196,12 @@ scene.add(key, key.target);
 const pmrem = new THREE.PMREMGenerator(renderer);
 scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 const loadingEl = document.getElementById("loading");
-const gltf = await new GLTFLoader().loadAsync("room.glb", e => {
-  if (e.total) loadingEl.textContent = `Loading the room… ${Math.round(e.loaded / e.total * 100)}%`;
-});
+const onProgress = e => { if (e.total) loadingEl.textContent = `Loading the room… ${Math.round(e.loaded / e.total * 100)}%`; };
+const loader = new GLTFLoader();
+// room.glb on a normal web host; room.json (glTF with separate textures) where .glb files are not served.
+let gltf;
+try { gltf = await loader.loadAsync("room.glb", onProgress); }
+catch { gltf = await loader.loadAsync("room.json", onProgress); }
 const room = gltf.scene;
 scene.add(room);
 room.updateMatrixWorld(true);
