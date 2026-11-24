@@ -51,6 +51,15 @@ bpy.ops.mesh.normals_make_consistent(inside=True); bpy.ops.object.mode_set(mode=
 
 # ---------- Booth back walls + header fascias behind every poster ----------
 posters = [o for o in objs if o.type == 'MESH' and o.name.startswith("Plane")]
+# Posters along the walls were authored facing the wall: turn them 180 degrees about their own centre
+from mathutils import Matrix
+for p in posters:
+    mw = p.matrix_world; n = (mw.to_3x3() @ p.data.polygons[0].normal).normalized()
+    c = sum((mw @ Vector(v) for v in p.bound_box), Vector()) / 8
+    if n.dot(Vector((-c.x, -c.y, 0)).normalized()) < 0:
+        p.matrix_world = Matrix.Translation(c) @ Matrix.Rotation(math.pi, 4, 'Z') @ Matrix.Translation(-c) @ mw
+        print("flipped", p.name)
+bpy.context.view_layer.update()
 bm = bmesh.new()
 navy_faces, white_faces = [], []
 def add_box(center, xaxis, w, h, d, z0, tag):
