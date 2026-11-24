@@ -16,13 +16,10 @@ objs = bpy.data.objects
 def select_only(o):
     bpy.ops.object.select_all(action='DESELECT'); o.select_set(True); bpy.context.view_layer.objects.active = o
 
-# ---------- Simplify heavy scans (applied, so baking is fast) ----------
+# ---------- Remove the mouflon and rock scans ----------
 for o in list(objs):
-    if o.type == 'MESH' and len(o.data.polygons) > 120000:
-        target = 250000 if o.name.startswith("Corentin") else 60000
-        m = o.modifiers.new("Decimate", 'DECIMATE'); m.ratio = target / len(o.data.polygons)
-        select_only(o); bpy.ops.object.modifier_apply(modifier=m.name)
-        print("decimated", o.name, len(o.data.polygons))
+    if o.type == 'MESH' and (o.name.startswith("Corentin") or o.name.startswith("Rocky Cliff")):
+        print("removed", o.name); bpy.data.objects.remove(o)
 
 # ---------- Room shell: replace the textured cube with floor + walls ----------
 cube = objs["Cube"]
