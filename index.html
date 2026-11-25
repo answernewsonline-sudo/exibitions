@@ -259,6 +259,95 @@ WORKS.forEach((wk, idx) => {
   scene.add(spot, spot.target);
 });
 
+/* ---------- Visitors: procedurally-animated figures that wander, idle and sit ----------
+   visitor.glb has no skeleton/skinning — each joint is a plain Object3D node, so
+   instances are made with ordinary .clone(true) (no SkeletonUtils needed) and each
+   clone gets its own AnimationMixer driving the shared Idle/Walk/Sit clips. */
+const visitorAsset = await loader.loadAsync("visitor.glb").catch(() => null);
+const visitors = [];
+let tickVisitor = null; // assigned below when the asset loads; never called while `visitors` is empty
+if (visitorAsset) {
+  const vClips = visitorAsset.animations; // Idle, Walk, Sit
+  const findInObstacle = p => obstacles.some(b => p.x > b.min.x && p.x < b.max.x && p.z > b.min.z && p.z < b.max.z);
+  const randomFloorPoint = () => {
+    for (let tries = 0; tries < 20; tries++) {
+      const p = new THREE.Vector3(THREE.MathUtils.randFloat(-RX + MARGIN, RX - MARGIN), 0, THREE.MathUtils.randFloat(-RZ + MARGIN, RZ - MARGIN));
+      if (!findInObstacle(p)) return p;
+    }
+    return new THREE.Vector3(0, 0, RZ - 1.3);
+  };
+  // Seat anchors: approximate world placement of "Chair" under "Office Desk & Chair"
+  // (the only chair in room.glb right now). Add more entries here as more chairs
+  // are added to the room; nudge x/z/seatY/yaw by eye if they don't look right.
+  const SEATS = [{ x: -0.78, z: -0.74, seatY: 0.46, yaw: Math.PI / 2, taken: false }];
+  const WALK_SPEED = 1.0, ARRIVE = 0.12, V_COUNT = 3;
+
+  function makeVisitor(i) {
+    const root = visitorAsset.scene.clone(true);
+    root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+    const p0 = randomFloorPoint();
+    root.position.copy(p0);
+    root.rotation.y = Math.random() * Math.PI * 2;
+    scene.add(root);
+    const mixer = new THREE.AnimationMixer(root);
+    const actions = Object.fromEntries(vClips.map(c => [c.name, mixer.clipAction(c, root)]));
+    Object.values(actions).forEach(a => a.play().setEffectiveWeight(0));
+    const v = { root, mixer, actions, current: null, state: "idle", t: 0, target: null, seat: -1 };
+    setVisitorAction(v, "Idle");
+    v.t = Math.random() * 3; // stagger so clones don't move in lockstep
+    return v;
+  }
+  function setVisitorAction(v, name) {
+    if (v.current === name) return;
+    const next = v.actions[name];
+    next.reset().fadeIn(0.35).play();
+    if (v.current) v.actions[v.current].fadeOut(0.35);
+    v.current = name;
+  }
+  function freeSeat(v) { if (v.seat >= 0) SEATS[v.seat].taken = false; v.seat = -1; }
+  function startWalkTo(v, p, seatIdx = -1) { v.target = p; v.seat = seatIdx; v.state = "walk"; setVisitorAction(v, "Walk"); }
+  function startIdle(v) { v.state = "idle"; v.t = THREE.MathUtils.randFloat(2, 6); setVisitorAction(v, "Idle"); }
+  function decideNext(v) {
+    const freeIdx = SEATS.findIndex(s => !s.taken);
+    if (freeIdx >= 0 && Math.random() < 0.35) {
+      SEATS[freeIdx].taken = true;
+      const s = SEATS[freeIdx];
+      startWalkTo(v, new THREE.Vector3(s.x + Math.sin(s.yaw) * 0.6, 0, s.z + Math.cos(s.yaw) * 0.6), freeIdx);
+    } else {
+      startWalkTo(v, randomFloorPoint());
+    }
+  }
+  tickVisitor = function (v, dt) {
+    v.mixer.update(dt);
+    if (v.state === "idle") {
+      v.t -= dt;
+      if (v.t <= 0) decideNext(v);
+    } else if (v.state === "walk") {
+      const to = v.target, pos = v.root.position;
+      const dx = to.x - pos.x, dz = to.z - pos.z, dist = Math.hypot(dx, dz);
+      if (dist < ARRIVE) {
+        if (v.seat >= 0) {
+          const s = SEATS[v.seat];
+          v.root.position.set(s.x, s.seatY, s.z);
+          v.root.rotation.y = s.yaw;
+          v.state = "sitting"; v.t = THREE.MathUtils.randFloat(6, 14);
+          setVisitorAction(v, "Sit");
+        } else { startIdle(v); }
+      } else {
+        const step = Math.min(WALK_SPEED * dt, dist);
+        pos.x += (dx / dist) * step; pos.z += (dz / dist) * step;
+        const heading = Math.atan2(-dx, -dz);
+        v.root.rotation.y = shortest(v.root.rotation.y, heading);
+      }
+    } else if (v.state === "sitting") {
+      v.t -= dt;
+      if (v.t <= 0) { freeSeat(v); v.root.position.y = 0; startIdle(v); }
+    }
+  }
+  for (let i = 0; i < V_COUNT; i++) visitors.push(makeVisitor(i));
+  window.__visitors = visitors;
+}
+
 /* ---------- Floor reticle ---------- */
 const reticle = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.2, 40), new THREE.MeshBasicMaterial({ color: 0x2c6a9a, transparent: true, opacity: 0.75, depthWrite: false }));
 reticle.rotation.x = -Math.PI / 2; reticle.position.y = 0.005; reticle.visible = false; scene.add(reticle);
@@ -448,6 +537,8 @@ function frame() {
   const ps = panelShift(), kk = reduceMotion ? 1 : Math.min(1, dt * 6);
   if (Math.abs(ps.x - shift.x) > 0.5 || Math.abs(ps.y - shift.y) > 0.5) { shift.x += (ps.x - shift.x) * kk; shift.y += (ps.y - shift.y) * kk; applyView(); }
   if (!reduceMotion && WORKS[6].knot) WORKS[6].knot.rotation.y += dt * 0.12;
+  if (!reduceMotion) for (const v of visitors) tickVisitor(v, dt);
+  else for (const v of visitors) v.mixer.update(0);
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
 }
